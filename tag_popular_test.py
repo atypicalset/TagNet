@@ -5,6 +5,7 @@ import pickle
 import codecs
 import re
 #from pprint import pprint 
+from glob import glob
 from random import random
 from operator import itemgetter
 from datetime import datetime
@@ -17,8 +18,124 @@ from scipy.optimize import fmin_slsqp
 from nltk.corpus import wordnet as wn
 
 def build_wn_tree(argv):
+    opts, db_wn = options_wntree(argv)
+    conn = sqlite3.connect(db_wn) # wnet tag info db
+    cursor = conn.cursor()
+    
+    file_list = glob(os.path.join(opts.data_home, opts.wnet_list_dir, 'n*[0-9].txt'))
+    wnid_list = map(lambda f: os.path.splitext( os.path.split(f)[1] )[0], file_list)
+    
+    out_file = os.path.join(opts.data_home, opts.db_dir, "imgnet-tree.pkl")
+    synre = re.compile("Synset\('(.*)'\)")
+    syn2str = lambda a: synre.findall(str(a))[0] if synre.findall(str(a)) else ""
+    
     wntree = nx.DiGraph()
+    wcnt = 0
+    
+    if opts.tree_mode == 'nltk':
+        for w in wnid_list:
+            nltk_id, _wlist, self_syn = map_wn2nltk(w, cursor)
+            if nltk_id:
+                #print nltk_id
+                wntree.add_node(nltk_id)
+                wntree[nltk_id]['wnid'] = w
+                asyn = self_syn.hyponyms()
+                aedg = map(lambda a: (syn2str(a), nltk_id), asyn )
+                psyn = self_syn.hypernyms()
+                pedg = map(lambda a: (nltk_id, syn2str(a)), psyn )
+                wntree.add_edges_from(aedg + pedg)
+            else:
+                pass
+            
+            wcnt += 1
+            if wcnt % 100 == 0:
+                tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+                print "%s, finish mapping %d of %d synsets" % (tt, wcnt, len(wnid_list))
+                print "\t graph has %d nodes, %d edges\n " % (wntree.number_of_nodes(), wntree.number_of_edges())
+                
+    else:
+        wntree.add_nodes_from(wnid_list)
+        try:
+            for w in wnid_list:
+                if wcnt < opts.startnum:
+                    continue
+                nltk_id, _wlist, _self_syn = map_wn2nltk(w, cursor)
+                if nltk_id:
+                    wntree[w]['name'] = nltk_id 
+                
+                childrenw = wn_get_hyponym(w, full=0)
+                for c in childrenw:
+                    wntree.add_edge(w, c)
+                wcnt += 1
+                if wcnt % 100 == 0:
+                    tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+                    print "%s, finish mapping %d of %d synsets, graph has %d edges\n" % (tt, wcnt, len(wnid_list), wntree.number_of_edges())
+        except:
+            tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+            print "%s, finish mapping %d of %d synsets, graph has %d edges" % (tt, wcnt, len(wnid_list), wntree.number_of_edges())
+            print "ERROR occurred after %d nodes !! \n\n" % wcnt
+                
+    
+    pickle.dump(wntree, open(out_file, "wb"))
+    print "saved imagenet tree of %d nodes, and %d edges" % ( wntree.number_of_nodes(), wntree.number_of_edges() )
+    
     return wntree
+
+
+def options_wntree(argv):
+    if len(argv)<2:
+            argv = ['-h']
+    parser = OptionParser(description='compile tags for all imgs in a wnet synset')
+    parser.add_option('-d', '--data_home', dest='data_home', default="", help='parent dir for exp data')
+    parser.add_option('-w', '--wnet_list_dir', dest='wnet_list_dir', default="wnet", help='subdir storing wnet info')
+    parser.add_option('', '--db_dir', dest='db_dir', default="db2", help='subdir storing various db')
+    parser.add_option("", '--db_wn', dest='db_wn', default="wordnet_tag.db", help='db about wordnet words and tags')
+    parser.add_option('-s', '--startnum', dest='startnum', type='int', default=-1, help='# of synset to start with')
+    parser.add_option('-m', "--tree_mode", dest="tree_mode", default='nltk', help='use nltk or imgnet id as the primary key')
+    (opts, __args) = parser.parse_args(sys.argv)
+    db_wn = os.path.join(opts.data_home, opts.db_dir, opts.db_wn)
+    
+    return opts, db_wn
+
+def map_wn2nltk(w, cursor, input_type="wnid"):
+    """
+        given imagenet id "n01234567" map it to the nltk noun id "dog.n.01"
+    """
+    
+    if input_type=="wnid":
+        # ['dog', 'domestic dog', 'Canis familiaris']
+        cursor.execute("SELECT words FROM wordnet WHERE wnid=?", (w,))
+        wlist = map(lambda s: s.strip(), cursor.fetchone()[0].split(","))
+    elif isinstance(w, str):
+        wlist = [w]
+    else:  # assume isinstance(w, list)
+        wlist = w
+    
+    synset_exist = True
+    syn_list = map(lambda s: wn.synsets(s.lower().replace(" ", "_"), pos="n"), wlist)
+    self_syn = reduce(lambda u,v: v if u==-1 else list(set(u) & set(v)), syn_list, -1)
+    
+    if len(self_syn) > 1:
+        print " %d synsets found for %s, take the 1st one: %s" % (len(self_syn), w, str(self_syn))
+        self_syn = self_syn[0]
+    elif len(self_syn) == 1:
+        self_syn = self_syn[0]
+    else: #len=0
+        print "ERROR: no synset found for %s" % (w)
+        synset_exist = False
+        #return {'self': {'depth':None, 'words':[]} }, wlist
+    
+    if synset_exist:
+        nltk_id = re.findall("Synset\('(.*)'\)", str(self_syn) )
+        if not nltk_id:
+            print "ERROR: synset parse empty for %s, %s" % (w, str(self_syn))
+            synset_exist = False
+        else:
+            nltk_id = nltk_id[0]
+    else:
+        nltk_id = ""
+        
+    return nltk_id, wlist, self_syn
 
 def wn_get_hyponym(wnid, full=0):
     """ 
@@ -110,29 +227,8 @@ def compile_synset_wordlist(w, cw, wn_cnt=None, db_wn=None, db_dict=None, addl_v
     conn = sqlite3.connect(db_wn) # wnet tag info db
     cursor = conn.cursor()
     
-    # ['dog', 'domestic dog', 'Canis familiaris']
-    cursor.execute("SELECT words FROM wordnet WHERE wnid=?", (w,))
-    wlist = map(lambda s: s.strip(), cursor.fetchone()[0].split(","))
-    
-    synset_exist = True
-    syn_list = map(lambda s: wn.synsets(s.lower().replace(" ", "_"), pos="n"), wlist)
-    self_syn = reduce(lambda u,v: v if u==-1 else list(set(u) & set(v)), syn_list, -1)
-    
-    if len(self_syn) > 1:
-        print "%d synsets found for %s, take the 1st one: %s" % (len(self_syn), w, str(self_syn))
-        self_syn = self_syn[0]
-    elif len(self_syn) == 1:
-        self_syn = self_syn[0]
-    else: #len=0
-        print "ERROR: no synset found for %s" % (w)
-        synset_exist = False
-        #return {'self': {'depth':None, 'words':[]} }, wlist
-    
-    if synset_exist:
-        nltk_id = re.findall("Synset\('(.*)'\)", str(self_syn) )
-        if not nltk_id:
-            print "ERROR: synset parse empty for %s, %s" % (w, str(self_syn))
-            synset_exist = False
+    nltk_id, wlist, self_syn = map_wn2nltk(w, cursor)
+    synset_exist = True if nltk_id else False
     
     if tag_count:
         td = tag_count

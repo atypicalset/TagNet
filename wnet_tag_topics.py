@@ -105,6 +105,7 @@ def get_wnet_tags(wn, wtag_file, opts, img_usr=None, force_reload=False):
         wn_file = os.path.join(opts.data_home, opts.wnet_list_dir, wn+'.txt')
         imgid_list = []
         for cl in open(wn_file, "rt"):
+            if not cl: continue
             tmp = cl.strip().split()
             if not tmp:
                 continue
