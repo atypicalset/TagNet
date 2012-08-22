@@ -61,7 +61,7 @@ def read_tag_cache(in_file):
 
 def cache_wnet_tag(opts):
     opts, _db_dict, _addl_vocab, _db_wn = options_get_wnet_tag(argv)
-    file_list = glob(os.path.join(opts.data_home, opts.wnet_list_dir, '*[0-9].txt'))
+    file_list = glob(os.path.join(opts.data_home, opts.wnet_list_dir, 'n*[0-9].txt'))
     
     tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
     print "%s start processing %d synsets " % (tt, len(file_list))
@@ -74,7 +74,7 @@ def cache_wnet_tag(opts):
     
     for f in file_list:
         scnt += 1
-        wn = os.path.splitext(f)[0] # synset id
+        wn = os.path.splitext( os.path.split(f)[1] )[0] # synset id
         wtag_file = os.path.join(opts.data_home, opts.wnet_list_dir, wn+'.tags.txt')
         
         tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
