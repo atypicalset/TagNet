@@ -4,17 +4,21 @@ import urllib2
 import pickle
 import codecs
 import re
-from pprint import pprint 
+#from pprint import pprint 
 from random import random
 from operator import itemgetter
 from datetime import datetime
 from optparse import OptionParser
 from count_bigram_flickr import norm_tag #read_unigram, read_bigram(src_file, bg_dict)
 #from compare_cooc import read_bigram_list
-#import networkx as nx
+import networkx as nx
 import numpy as np
 from scipy.optimize import fmin_slsqp
 from nltk.corpus import wordnet as wn
+
+def build_wn_tree(argv):
+    wntree = nx.DiGraph()
+    return wntree
 
 def wn_get_hyponym(wnid, full=0):
     """ 
@@ -497,14 +501,16 @@ def norm_tag_file(argv):
     conn.close()
 
 
-
 if __name__ == '__main__':
     argv = sys.argv 
     if "--norm_tag_file" in argv:
         argv.remove("--norm_tag_file")
         norm_tag_file(argv)
-    elif "--eval_tag_prob" in argv:
-        argv.remove("--eval_tag_prob")
+    elif "--build_wn_tree" in argv:
+        argv.remove("--build_wn_tree")
+        build_wn_tree(argv)
+    #elif "--eval_tag_prob" in argv:
+    #    argv.remove("--eval_tag_prob")
         #eval_tag_prob(argv)
     else:
         map_wn_words(argv)

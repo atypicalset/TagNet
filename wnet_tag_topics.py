@@ -74,6 +74,11 @@ def cache_wnet_tag(opts):
     
     for f in file_list:
         scnt += 1
+        if scnt > opts.endnum:
+            break
+        if scnt < opts.startnum:
+            continue
+        
         wn = os.path.splitext( os.path.split(f)[1] )[0] # synset id
         wtag_file = os.path.join(opts.data_home, opts.wnet_list_dir, wn+'.tags.txt')
         
@@ -299,6 +304,9 @@ def options_get_wnet_tag(argv):
     parser.add_option("", '--db_wn', dest='db_wn', default="wordnet_tag.db", help='db about wordnet words and tags')
     parser.add_option("", '--db_dict', dest='db_dict', default="dict.db", help='dictionary')
     parser.add_option("", '--addl_vocab', dest='addl_vocab', default="places_etc_v2.txt", help='')
+    
+    parser.add_option('-s', '--startnum', dest='startnum', type='int', default=-1, help='# of synset to start with')
+    parser.add_option('-e', '--endnum', dest='endnum', type='int', default=1e6, help='# of synset to stop processing')
     
     (opts, __args) = parser.parse_args(sys.argv)
     db_dict = os.path.join(opts.data_home, opts.db_dir, opts.db_dict)
