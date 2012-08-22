@@ -9,7 +9,8 @@ import codecs
 #from pprint import pprint 
 #from random import random
 #from operator import itemgetter
-from itertools import groupby
+#from itertools import groupby
+from glob import glob
 from scipy import io
 from datetime import datetime
 from optparse import OptionParser
@@ -58,73 +59,143 @@ def read_tag_cache(in_file):
         cache_dict[tmp[0]] = tmp[1]
     return cache_dict
 
-def get_wnet_usr_tag(argv):
-    # parser = OptionParser(description='compile tags for all imgs in a wnet synset')
-    opts, db_dict, addl_vocab, db_wn = options_get_wnet_tag(argv)
-    tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
-    print "%s start processing '%s' " % (tt, opts.in_wnet_list)
+def cache_wnet_tag(opts):
+    opts, _db_dict, _addl_vocab, _db_wn = options_get_wnet_tag(argv)
+    file_list = glob(os.path.join(opts.data_home, opts.wnet_list_dir, '*[0-9].txt'))
     
+    tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+    print "%s start processing %d synsets " % (tt, len(file_list))
+    scnt = 0
     
     lines = parse_lines_fromfile(os.path.join(opts.data_home, opts.db_dir, opts.usr_file) )
     img_usr = dict(lines)
     tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
     print "%s read %d usr ids from %s" % (tt, len(img_usr), opts.usr_file)
     
-    dbcn = sqlite3.connect(db_dict) # dictionary db
-    dbcsr = dbcn.cursor()
+    for f in file_list:
+        scnt += 1
+        wn = os.path.splitext(f)[0] # synset id
+        wtag_file = os.path.join(opts.data_home, opts.wnet_list_dir, wn+'.tags.txt')
+        
+        tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+        print '\n%s synset # %d "%s"' % (tt, scnt, wn)
+        get_wnet_tags(wn, wtag_file, opts, img_usr, force_reload=True)
     
-    if os.path.isfile(opts.in_wnet_list):
-        wnet_list = open(os.path.join(opts.in_wnet_list), 'rt').read().split()
+    
+def get_wnet_tags(wn, wtag_file, opts, img_usr=None, force_reload=False):
+    """
+        collect each image id, usr id, and tags for the input synset
+    """
+    
+    if os.path.isfile(wtag_file) and not force_reload:
+        imgid_list = []
+        usr_list= []
+        tag_dict = {}
+        for cl in codecs.open(wtag_file, encoding='utf-8', mode="r"):
+            tt = cl.strip().split()
+            imgid_list.append(tt[0])
+            usr_list.append(tt[1])
+            tag_dict[tt[0]] = tt[2].split(",")
     else:
-        wnet_list = opts.in_wnet_list.split(",")
-        
-    for wn in wnet_list:
         wn_file = os.path.join(opts.data_home, opts.wnet_list_dir, wn+'.txt')
-        
         imgid_list = []
         for cl in open(wn_file, "rt"):
             tmp = cl.strip().split()
             if not tmp:
                 continue
             imgid_list.append(tmp[1])
-        
         imgid_list.sort()
+        numim = len(imgid_list)
+        
+        if not img_usr:
+            lines = parse_lines_fromfile(os.path.join(opts.data_home, opts.db_dir, opts.usr_file) )
+            img_usr = dict(lines)
+            tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+            print "%s read %d usr ids from %s" % (tt, len(img_usr), opts.usr_file)
+        
         usr_list = map(lambda s: img_usr[s] if s in img_usr else "unk", imgid_list)
-
-        tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
-        print '%s wnet "%s" - %d imgs, %d users' % (tt, wn, len(imgid_list), len(set(usr_list)))
+        
+        cur_cache_id = []
+        empty_cnt = 0
+        del_id = []
+        tag_dict = {}
+        fh = codecs.open(wtag_file, encoding='utf-8', mode="w")
+        for (imgid, uid, ii) in zip(imgid_list, usr_list, range(len(usr_list))):
             
-        cur_cache_id = ""
+            if not cur_cache_id==imgid[:2]:
+                # read new cache file
+                cur_cache_id = imgid[:2]
+                cur_cache_file = os.path.join(opts.data_home, opts.tag_cache_dir, cur_cache_id+".cache")
+                cache_dict = read_tag_cache(cur_cache_file)
+                #print "\t read %s imgs from %s" % (len(cache_dict), cur_cache_id+".cache")
+            else:
+                pass
+            
+            if imgid in cache_dict:
+                ww = cache_dict[imgid].split(",")
+            else: # img has no tag
+                ww = []
+                empty_cnt += 1
+            
+            if ww:
+                tag_dict[imgid] = ww
+                fh.write("%s\t%s\t%s\n" % (imgid, uid, ",".join(ww)))
+            else:
+                del_id.append(ii)
+                
+        fh.close()
+        del_id.sort(reverse=True) #pop bigger indexes first, trouble otherwise
+        for ii in del_id:
+            imgid_list.pop(ii)
+            usr_list.pop(ii)
+    
+    tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+    print '%s wnet "%s" - %d imgs, %d with tags, %d unique users' % (tt, wn, numim, len(imgid_list), len(set(usr_list)))
+        
+    return imgid_list, usr_list, tag_dict
+            
+
+def get_wnet_usr_tag(argv):
+    # parser = OptionParser(description='compile tags for all imgs in a wnet synset')
+    opts, db_dict, addl_vocab, db_wn = options_get_wnet_tag(argv)
+    
+    tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+    print "%s start processing '%s' " % (tt, opts.in_wnet_list)
+    
+    
+    dbcn = sqlite3.connect(db_dict) # dictionary db
+    dbcsr = dbcn.cursor()
+    
+    if os.path.isfile(opts.in_wnet_list):
+        wnet_list = open(opts.in_wnet_list, 'rt').read().split()
+    else:
+        wnet_list = opts.in_wnet_list.split(",")
+        
+    for wn in wnet_list:
+        
+        wtag_file = os.path.join(opts.data_home, opts.wnet_list_dir, wn+'.tags.txt')
+        imgid_list, usr_list, tag_dict = get_wnet_tags(wn, wtag_file, opts, False)
+        
         usr_tag = {}
         tag_cnt = {}
         empty_cnt = 0
         
-        for u, utuple in groupby(zip(usr_list, imgid_list), lambda x: x[0]):
-            usr_tag[u] = {}
-            for t in utuple:
-                imgid = t[1]
-                if not cur_cache_id==imgid[:2]:
-                    # read new cache file
-                    cur_cache_id = imgid[:2]
-                    cur_cache_file = os.path.join(opts.data_home, opts.tag_cache_dir, cur_cache_id+".cache")
-                    cache_dict = read_tag_cache(cur_cache_file)
-                    #print "\t read %s imgs from %s" % (len(cache_dict), cur_cache_id+".cache")
-                else:
-                    pass
-                
-                if imgid in cache_dict:
-                    ww = cache_dict[imgid].split(",")
-                else: # img has no tag
-                    ww = []
-                    empty_cnt += 1
+        #for u, utuple in groupby(zip(usr_list, imgid_list), lambda x: x[0]):
+        for (imid, u) in zip(imgid_list, usr_list):
+            if u not in usr_tag:
+                usr_tag[u] = {}
                     
-                vv = map(lambda s:norm_tag(s, dbcsr, addl_vocab,1), ww)
-                vv = list(set(filter(len, vv)))
-                for v in vv:
-                    usr_tag[u][v] = usr_tag[u].get(v, 0)+1
+            vv = map(lambda s:norm_tag(s, dbcsr, addl_vocab,1), tag_dict[imid])
+            vv = list(set(filter(len, vv)))
+            for v in vv:
+                if v in usr_tag[u]:
+                    usr_tag[u][v] += 1
+                else:
+                    usr_tag[u][v] = 1
+                    tag_cnt[v] = tag_cnt.get(v, 0)+1
             
-            for v in list(set(usr_tag[u])):
-                tag_cnt[v] = tag_cnt.get(v, 0)+1
+            #for v in list(set(usr_tag[u])):
+                
         
         tag_list = filter(lambda t: tag_cnt[t]>1, tag_cnt.keys())
         tag_list.sort()
@@ -212,111 +283,6 @@ def get_wnet_usr_tag(argv):
             if lcnt<50: print outstr
         wn_bgf.close()
         
-    
-def get_wnet_tag(argv):
-    # parser = OptionParser(description='compile tags for all imgs in a wnet synset')
-    opts, db_dict, addl_vocab, db_wn = options_get_wnet_tag(argv)
-    
-    dbcn = sqlite3.connect(db_dict) # dictionary db
-    dbcsr = dbcn.cursor()
-    
-    wnet_list = open(os.path.join(opts.in_wnet_list), 'rt').read().split()
-    for wn in wnet_list:
-        wn_file = os.path.join(opts.data_home, opts.wnet_list_dir, wn+'.txt')
-        
-        imgid_list = []
-        for cl in open(wn_file, "rt"):
-            tmp = cl.strip().split()
-            if not tmp:
-                continue
-            imgid_list.append(tmp[1])
-        
-        imgid_list.sort()
-        tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
-        print '%s wnet "%s" has %d imgs' % (tt, wn, len(imgid_list))
-        
-        cur_cache_id = ""
-        img_tag = {}
-        tag_cnt = {}
-        empty_cnt = 0
-        for imgid in imgid_list:
-            if not cur_cache_id==imgid[:2]:
-                # read new cache file
-                cur_cache_id = imgid[:2]
-                cur_cache_file = os.path.join(opts.data_home, opts.tag_cache_dir, cur_cache_id+".cache")
-                cache_dict = read_tag_cache(cur_cache_file)
-                #print "\t read %s imgs from %s" % (len(cache_dict), cur_cache_id+".cache")
-            else:
-                pass
-            
-            if imgid in cache_dict:
-                ww = cache_dict[imgid].split(",")
-            else:
-                ww = []
-                empty_cnt += 1
-                #print "\t error in %s, with tags %s" % (cur_cache_id+".cache", imgid)
-                
-            vv = map(lambda s:norm_tag(s, dbcsr, addl_vocab,1), ww)
-            img_tag[imgid] = list(set(filter(len, vv)))
-            for t in img_tag[imgid] :
-                if t in tag_cnt:
-                    tag_cnt[t] += 1
-                else:
-                    tag_cnt[t] = 1
-        
-        tag_list = filter(lambda t: tag_cnt[t]>1, tag_cnt.keys())
-        tag_list.sort()
-        tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
-        print "%s obtained %d imgs x %d tags, %d empty imgs " % (tt, len(imgid_list), len(tag_list), empty_cnt)
-        
-        img_list = []
-        tcnt_mat = np.zeros( (len(imgid_list), len(tag_list)), dtype=np.int8 )
-        icnt = 0
-        out_dat_fh = open(os.path.join(opts.data_home, opts.wnet_out_dir, wn+".dat"), "wt")
-        for imgid in imgid_list:
-            jj = -1
-            if img_tag[imgid]:
-                for t in img_tag[imgid]:
-                    if t in tag_list:
-                        jj  = tag_list.index(t)
-                        tcnt_mat[icnt, jj] = 1
-                        out_dat_fh.write("%d:1 " % (jj+1) )
-            else:
-                pass # empty list of tags, skip
-           
-            if jj >= 0:
-                out_dat_fh.write("\n")
-                icnt += 1
-                img_list.append(imgid)
-            
-        tag_out_file = os.path.join(opts.data_home, opts.wnet_out_dir, wn+"_taglist.txt")
-        codecs.open(tag_out_file, encoding='utf-8', mode="w").write("\n".join(tag_list))
-        img_out_file = os.path.join(opts.data_home, opts.wnet_out_dir, wn+"_imglist.txt")
-        codecs.open(img_out_file, encoding='utf-8', mode="w").write("\n".join(img_list))
-        
-        tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
-        print '%s wnet "%s": %d unique tags in %d imgs\n' % (tt, wn, len(tag_list), len(img_list))
-        
-        # get and print synset info
-        td = dict([ (k, tag_cnt[k]) for k in tag_list ])
-        syn_info, wlist = compile_synset_wordlist(wn, len(img_list), None, db_wn, db_dict, addl_vocab, td)
-        hi_words = [syn_info['self']['words']] + syn_info['ancestor'].values() + syn_info['descendant'].values()
-        hi_depth = [0 ] + syn_info['ancestor'].keys() + syn_info['descendant'].keys()
-        other_words = list(set(tag_list) - set(reduce(lambda a,b: a+b, hi_words, [])) )
-        print_synset_info(syn_info, wn, wlist, len(img_list))
-        
-        wn_out_mat = os.path.join(opts.data_home, opts.wnet_out_dir, wn+".mat")
-        tcnt = tcnt_mat[:icnt, :]
-        #mlab.save(wn_out_mat, 'img_list', 'tag_list', 'tcnt_mat')
-        data = {'img_list': img_list, 'tag_list': tag_list, 'tcnt':tcnt, 
-                'other_words':other_words, 'hier_words':hi_words, 'hier_depth':hi_depth}
-        io.savemat(wn_out_mat, data)
-        
-        tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
-        print '%s saved to %s \n\n' % (tt, wn_out_mat)
-    
-    dbcn.close()
-            
 
 def options_get_wnet_tag(argv):
     if len(argv)<2:
@@ -343,9 +309,9 @@ def options_get_wnet_tag(argv):
 
 if __name__ == '__main__':
     argv = sys.argv 
-    if "--get_wnet_tag" in argv:
-        argv.remove("--get_wnet_tag")
-        get_wnet_tag(argv)
+    if "--cache_wnet_tag" in argv:
+        argv.remove("--cache_wnet_tag")
+        cache_wnet_tag(argv)
     elif "--get_wnet_usr_tag" in argv:
         argv.remove("--get_wnet_usr_tag")
         get_wnet_usr_tag(argv)
