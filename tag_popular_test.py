@@ -10,16 +10,39 @@ from random import random
 from operator import itemgetter
 from datetime import datetime
 from optparse import OptionParser
-from count_bigram_flickr import norm_tag #read_unigram, read_bigram(src_file, bg_dict)
-#from compare_cooc import read_bigram_list
+
 import networkx as nx
 import numpy as np
 from scipy.optimize import fmin_slsqp
 from nltk.corpus import wordnet as wn
 
+from count_bigram_flickr import norm_tag #read_unigram, read_bigram(src_file, bg_dict)
+#from compare_cooc import read_bigram_list
 
-def extract_wn_subtree(G, q):
-    pass
+
+def extract_subtree(G, q, node_list=[], direction="both"):
+    if direction=="up" or direction=="both":
+        qpre = G.predecessors(q)
+        node_list.extend( qpre )
+        for n in qpre:
+            extract_subtree(G, n, node_list, direction="up")
+    
+    if direction=="down" or direction=="both":
+        qsuc = G.successors(q)
+        node_list.extend( qsuc )
+        for n in qsuc:
+            extract_subtree(G, n, node_list, direction="down")
+    #else:
+    #    print "unkonwn query direction"
+
+def query_node_name(G, q):
+    q = q.lower()
+    node_data = []
+    for ni, nn in G.nodes_iter(data=True):
+        if 'name' in nn and nn['name'].split(".")[0]==q:
+            node_data.append( (ni, nn) )
+    
+    return node_data            
     
     
 def build_wn_tree(argv):

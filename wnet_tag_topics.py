@@ -109,7 +109,7 @@ def get_wnet_tags(wn, wtag_file, opts, img_usr=None, force_reload=False):
     for cl in open(wn_file, "rt"):
         if not cl: continue
         tmp = cl.strip().split()
-        if not tmp:
+        if not tmp or len(tmp)<2 :
             continue
         img_list_from_file.append(tmp[1])
     img_list_from_file.sort()
@@ -154,7 +154,7 @@ def get_wnet_tags(wn, wtag_file, opts, img_usr=None, force_reload=False):
             
             if opts.use_json:
                 jinfo = cache_flickr_info(imgid, "", rootdir=os.path.join(opts.data_home, opts.json_dir) )
-                if 'stat' not in jinfo or not jinfo['stat']=='ok' :
+                if not jinfo or 'stat' not in jinfo or not jinfo['stat']=='ok' :
                     pass # no valid metadata         
                 else:
                     pinfo = jinfo["photo"]
@@ -202,7 +202,7 @@ def get_wnet_tags(wn, wtag_file, opts, img_usr=None, force_reload=False):
     return imgid_list, usr_list, tag_dict
             
 
-def get_wnet_usr_tag(argv):
+def analyze_tag_pairs(argv):
     # parser = OptionParser(description='compile tags for all imgs in a wnet synset')
     opts, db_dict, addl_vocab, db_wn = options_get_wnet_tag(argv)
     
@@ -324,7 +324,7 @@ def get_wnet_usr_tag(argv):
             else:
                 btype = "HO"
                 
-            outstr = "%5d\t%0.3f\t%s\t%s,%s\t%s" % (c, mi, btype, u, v, ";".join(atxt))
+            outstr = "%5d\t%0.3f\t%s\t%s,%s\t%s" % (c, mi, btype, u, v, ";".join(atxt) if atxt else "None")
             wn_bgf.write(outstr +"\n")
             lcnt += 1
             if lcnt<50: print outstr
@@ -364,9 +364,9 @@ if __name__ == '__main__':
     if "--cache_wnet_tag" in argv:
         argv.remove("--cache_wnet_tag")
         cache_wnet_tag(argv)
-    elif "--get_wnet_usr_tag" in argv:
-        argv.remove("--get_wnet_usr_tag")
-        get_wnet_usr_tag(argv)
+    elif "--analyze_tag_pairs" in argv:
+        argv.remove("--analyze_tag_pairs")
+        analyze_tag_pairs(argv)
     else:
         #map_wn_words(argv)
         pass  

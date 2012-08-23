@@ -31,8 +31,12 @@ def cache_flickr_info(imgid, cur_key, rootdir=FLICKR_XML_DIR, hash_level=2, char
 	jinfo = {}
 	if os.path.exists(meta_name):
 		#print meta_name
-		jstr = codecs.open(meta_name, encoding='utf-8', mode='rt').read()
-		jinfo = json.loads( jstr )
+		try:
+			jstr = codecs.open(meta_name, encoding='utf-8', mode='rt').read()
+			jinfo = json.loads( jstr )
+		except:
+			print "  error reading %s " % meta_name
+			jinfo = {}
 	else:
 		try:
 			req_url = flickr_get_info % (cur_key, imgid)
