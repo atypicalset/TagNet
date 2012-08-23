@@ -17,6 +17,11 @@ import numpy as np
 from scipy.optimize import fmin_slsqp
 from nltk.corpus import wordnet as wn
 
+
+def extract_wn_subtree(G, q):
+    pass
+    
+    
 def build_wn_tree(argv):
     opts, db_wn = options_wntree(argv)
     conn = sqlite3.connect(db_wn) # wnet tag info db
@@ -26,42 +31,59 @@ def build_wn_tree(argv):
     wnid_list = map(lambda f: os.path.splitext( os.path.split(f)[1] )[0], file_list)
     
     out_file = os.path.join(opts.data_home, opts.db_dir, "imgnet-tree.pkl")
-    synre = re.compile("Synset\('(.*)'\)")
+    synre = re.compile("^Synset\(['\"]([^\)]*)['\"]\)") #("Synset\('(.*)'\)")
     syn2str = lambda a: synre.findall(str(a))[0] if synre.findall(str(a)) else ""
     
     wntree = nx.DiGraph()
     wcnt = 0
     
     if opts.tree_mode == 'nltk':
+        nltk_list = []
         for w in wnid_list:
-            nltk_id, _wlist, self_syn = map_wn2nltk(w, cursor)
+            nltk_id, _wlist, self_syn = map_wn2nltk(w, cursor, quiet=True)
             if nltk_id:
                 #print nltk_id
-                wntree.add_node(nltk_id)
-                wntree[nltk_id]['wnid'] = w
+                wntree.add_node(nltk_id, wnid=w)
+                nltk_list.append(nltk_id)
+        
+        tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+        print "%s, finish adding %d wnid into %d synsets " % (tt, len(wnid_list), len(nltk_list)) 
+                    
+        for nltk_id in nltk_list:
+                self_syn = wn.synset(nltk_id)
                 asyn = self_syn.hyponyms()
-                aedg = map(lambda a: (syn2str(a), nltk_id), asyn )
+                aedg = map(lambda a: (nltk_id, syn2str(a)), asyn )
                 psyn = self_syn.hypernyms()
-                pedg = map(lambda a: (nltk_id, syn2str(a)), psyn )
-                wntree.add_edges_from(aedg + pedg)
-            else:
-                pass
+                pedg = map(lambda a: (syn2str(a), nltk_id), psyn )
+                if not aedg and not pedg:
+                    print "empty edges for '%s': %s, %s" % (nltk_id, str(asyn), str(psyn))
+                else:
+                    eg_list = filter(lambda t: t[1] in nltk_list and t[0] in nltk_list, aedg + pedg)
+                    wntree.add_edges_from(eg_list)
             
-            wcnt += 1
-            if wcnt % 100 == 0:
-                tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
-                print "%s, finish mapping %d of %d synsets" % (tt, wcnt, len(wnid_list))
-                print "\t graph has %d nodes, %d edges\n " % (wntree.number_of_nodes(), wntree.number_of_edges())
+                wcnt += 1
+                if wcnt % 1000 == 0:
+                    tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+                    print "%s, finish adding %d/%d synsets, " % (tt, wcnt, len(wnid_list)) + \
+                        " graph has %d nodes, %d edges\n " % (wntree.number_of_nodes(), wntree.number_of_edges())
+        
+        newncnt = 0
+        for n in wntree.nodes_iter(data=True):
+            if not 'wnid' in n[1]:
+                wntree.add_node(n[0], wnid = None)
+                newncnt += 1
+        print " wnid added for %d new nodes " % (newncnt)
                 
     else:
         wntree.add_nodes_from(wnid_list)
         try:
             for w in wnid_list:
+                #wntree.add_node(w)
                 if wcnt < opts.startnum:
                     continue
                 nltk_id, _wlist, _self_syn = map_wn2nltk(w, cursor)
                 if nltk_id:
-                    wntree[w]['name'] = nltk_id 
+                    wntree.add_node(w, name = nltk_id) 
                 
                 childrenw = wn_get_hyponym(w, full=0)
                 for c in childrenw:
@@ -77,7 +99,8 @@ def build_wn_tree(argv):
                 
     
     pickle.dump(wntree, open(out_file, "wb"))
-    print "saved imagenet tree of %d nodes, and %d edges" % ( wntree.number_of_nodes(), wntree.number_of_edges() )
+    tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
+    print "%s saved imagenet tree of %d nodes, and %d edges" % (tt, wntree.number_of_nodes(), wntree.number_of_edges() )
     
     return wntree
 
@@ -97,7 +120,7 @@ def options_wntree(argv):
     
     return opts, db_wn
 
-def map_wn2nltk(w, cursor, input_type="wnid"):
+def map_wn2nltk(w, cursor, input_type="wnid", quiet=False):
     """
         given imagenet id "n01234567" map it to the nltk noun id "dog.n.01"
     """
@@ -116,7 +139,8 @@ def map_wn2nltk(w, cursor, input_type="wnid"):
     self_syn = reduce(lambda u,v: v if u==-1 else list(set(u) & set(v)), syn_list, -1)
     
     if len(self_syn) > 1:
-        print " %d synsets found for %s, take the 1st one: %s" % (len(self_syn), w, str(self_syn))
+        if not quiet:
+            print " %d synsets found for %s, take the 1st one: %s" % (len(self_syn), w, str(self_syn))
         self_syn = self_syn[0]
     elif len(self_syn) == 1:
         self_syn = self_syn[0]
@@ -126,7 +150,7 @@ def map_wn2nltk(w, cursor, input_type="wnid"):
         #return {'self': {'depth':None, 'words':[]} }, wlist
     
     if synset_exist:
-        nltk_id = re.findall("Synset\('(.*)'\)", str(self_syn) )
+        nltk_id = re.findall("^Synset\(['\"]([^\)]*)['\"]\)", str(self_syn) )
         if not nltk_id:
             print "ERROR: synset parse empty for %s, %s" % (w, str(self_syn))
             synset_exist = False
@@ -297,7 +321,11 @@ def print_synset_info(synset_info, w, wlist, syn_cnt):
                    
     oth_cnt = sorted(map(lambda s: (s, td[s]), synset_info['other']), key=itemgetter(1), reverse=True)
     print ("\t other %0.3f : " % po) + str( oth_cnt[:10] )
-    
+
+
+def fit_synset_factors(synset_info):
+    pl = []
+    return pl    
 
 def min_synset_prob(synset_info):
     

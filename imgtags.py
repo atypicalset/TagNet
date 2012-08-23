@@ -4,6 +4,7 @@ import re
 import random
 from datetime import datetime
 import json
+import codecs
 from optparse import OptionParser
 
 DEBUG = 1
@@ -30,7 +31,7 @@ def cache_flickr_info(imgid, cur_key, rootdir=FLICKR_XML_DIR, hash_level=2, char
 	jinfo = {}
 	if os.path.exists(meta_name):
 		#print meta_name
-		jstr = open(meta_name, 'rt').read()
+		jstr = codecs.open(meta_name, encoding='utf-8', mode='rt').read()
 		jinfo = json.loads( jstr )
 	else:
 		try:
