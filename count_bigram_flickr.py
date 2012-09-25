@@ -152,7 +152,7 @@ def accumulate_bg(tr, bg_dict, uni_dict, cursor, addl_vocab=[]):
         tt = filter(lambda s: len(s)>1, tt)
         tt = list(set(tt))
     else:
-        tt = tr
+        tt = list(set(tr)) 
         
     tt.sort()
     for i in range(len(tt)):
@@ -161,7 +161,7 @@ def accumulate_bg(tr, bg_dict, uni_dict, cursor, addl_vocab=[]):
                 uni_dict[tt[i]] = 1
             else:
                 uni_dict[tt[i]] += 1
-        for j in range(i-1):
+        for j in range(i):
             if tt[j] not in bg_dict:
                 bg_dict[tt[j]] = {}
             if tt[i] not in bg_dict[tt[j]]:

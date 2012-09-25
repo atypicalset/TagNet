@@ -47,6 +47,9 @@ def binary_mutual_info(N, x, y, xy):
             if not pxy[ij] or not px[i] or not py[j]:
                 continue
             if px[i]<0 or py[j]<0 or pxy[ij]<0:
+                print N, x, y, xy
+                print px, py, pxy
+                print ""
                 raise Exception("ValueError: probability less than 0!")
             
             Ixy += pxy[ij] * math.log( pxy[ij]/(px[i]*py[j]) , 2) 
@@ -125,11 +128,10 @@ def get_wnet_tags(wn, wtag_file, opts, img_usr=None, force_reload=False):
             imgid_list.append(tt[0])
             usr_list.append(tt[1])
             tag_dict[tt[0]] = tt[2].split(",")
+        print " read %d image entries from %s " % (len(imgid_list), wtag_file)
     else:
-        pass #imgid_list = []
-    
-    
-    if numim > len(imgid_list):
+        #pass #imgid_list = []
+        #if numim > len(imgid_list):
         imgid_list = img_list_from_file
         
         if not img_usr:
@@ -142,7 +144,6 @@ def get_wnet_tags(wn, wtag_file, opts, img_usr=None, force_reload=False):
             tt = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
             print "%s read %d usr ids from %s" % (tt, len(img_usr), opts.usr_file)
             
-        
         usr_list = map(lambda s: img_usr[s] if s in img_usr else "unk", imgid_list)
         
         cur_cache_id = []
@@ -218,9 +219,11 @@ def analyze_tag_pairs(argv):
     else:
         wnet_list = opts.in_wnet_list.split(",")
         
-    for wn in wnet_list:
+    for (iw, wn) in enumerate(wnet_list):
+        if iw > opts.endnum:
+            break
         
-        wtag_file = os.path.join(opts.data_home, opts.wnet_list_dir, wn+'.tags.txt')
+        wtag_file = os.path.join(opts.data_home, opts.wnet_list_dir+"_tags", wn+'.tags.txt')
         imgid_list, usr_list, tag_dict = get_wnet_tags(wn, wtag_file, opts, False)
         
         usr_tag = {}
@@ -238,8 +241,11 @@ def analyze_tag_pairs(argv):
                 if v in usr_tag[u]:
                     usr_tag[u][v] += 1
                 else:
-                    usr_tag[u][v] = 1
-                    tag_cnt[v] = tag_cnt.get(v, 0)+1
+                    usr_tag[u][v] = 1 # first time seeing user u use tag v
+                    if v in tag_cnt:
+                        tag_cnt[v] += 1
+                    else:
+                        tag_cnt[v] = 1
             
             #for v in list(set(usr_tag[u])):
                 
@@ -308,15 +314,22 @@ def analyze_tag_pairs(argv):
         wn_tagf.close()
         
         print "\nbigrams#\tMI \ttype\ttag1,tag2\trelations"
+        Nusr = len(usr_tag)
         lcnt = 0
         bg_tuples = sort_bg(bg_dict)
         wn_bgf = open(os.path.join(opts.data_home, opts.wnet_out_dir, wn+".bigram.txt"), "wt")
         for u, v, c in bg_tuples:
+            if c<3: break
             assr = cm.Assertion.objects.filter(concept1__text=u, concept2__text=v,language=en)
             atxt = map(lambda a: str(a).strip("[]"), assr)
             atxt += map(lambda a: str(a).strip("[]"), 
                         cm.Assertion.objects.filter(concept1__text=v, concept2__text=u,language=en))
-            mi = binary_mutual_info(len(usr_tag), tag_cnt[u], tag_cnt[v], c)
+            try:
+                mi = binary_mutual_info(Nusr, tag_cnt[u], tag_cnt[v], c)
+            except:
+                print u, v, c, len(usr_tag)
+                raise
+            
             if u in other_words and v in other_words:
                 btype = "OO"
             elif u in hi_words and v in hi_words:
@@ -324,10 +337,12 @@ def analyze_tag_pairs(argv):
             else:
                 btype = "HO"
                 
-            outstr = "%5d\t%0.3f\t%s\t%s,%s\t%s" % (c, mi, btype, u, v, ";".join(atxt) if atxt else "None")
+            outstr = "%s\t%0.5f\t%0.5f\t%s\t%s,%s\t%s" % \
+                (syn_info['nltk_id'], 1.*c/Nusr, mi, btype, u, v, ";".join(atxt) if atxt else "None")
             wn_bgf.write(outstr +"\n")
             lcnt += 1
             if lcnt<50: print outstr
+            
         wn_bgf.close()
         
 
@@ -340,7 +355,7 @@ def options_get_wnet_tag(argv):
     parser.add_option('-c', '--tag_cache_dir', dest='tag_cache_dir', default="bigram", help='subdir storing tag cache by id')
     parser.add_option('-u', '--usr_file', dest='usr_file', default="flickr_usr_5M.txt.gz", help='file for usr-img mapping')
     parser.add_option('-w', '--wnet_list_dir', dest='wnet_list_dir', default="wnet", help='subdir storing wnet info')
-    parser.add_option('-o', '--wnet_out_dir', dest='wnet_out_dir', default="wnet-tags", help='dir for wnet tag output')
+    parser.add_option('-o', '--wnet_out_dir', dest='wnet_out_dir', default="wnet-out", help='dir for wnet tag output')
     parser.add_option('', '--db_dir', dest='db_dir', default="db2", help='subdir storing various db')
     parser.add_option('', '--json_dir', dest='json_dir', default="json", help='subdir storing original json metadata')
     parser.add_option('-j', '--use_json', dest='use_json', type ='int', default=0, help='load tags from json or not')
